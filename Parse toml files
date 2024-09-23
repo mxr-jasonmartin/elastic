@@ -1,0 +1,108 @@
+# Directory where .toml files are located
+$directoryPath = "C:\Users\ja008827\Downloads\vscode-directory\Elastic Detection Rules"
+
+# Ensure the directory exists
+if (-not (Test-Path $directoryPath)) {
+    Write-Host "Directory does not exist: $directoryPath"
+    exit
+}
+
+# Flag to decide where to output results
+$outputToFile = $true
+
+# Create a datetime stamp for the filename if outputting to file
+if ($outputToFile) {
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $outputFile = "C:\Users\ja008827\Downloads\vscode-directory\output_$timestamp.csv"
+   
+    # Create CSV header
+    @("FileName", "Name", "Query") | Out-File -FilePath $outputFile -Encoding utf8
+}
+
+# Get all .toml files recursively
+Get-ChildItem -Path $directoryPath -Recurse -Filter *.toml | ForEach-Object {
+    $file = $_.FullName
+    $content = Get-Content -Path $file
+
+    # Initialize variables for name, index, query, and matches
+    $name = ""
+    $queryRaw2 = ""
+    $queryMatches1 = @()  # For index values
+    $queryMatches2 = @()  # For query fields
+
+    # Flags to track sections and collection states
+    $inRuleSection = $false
+    $collectingQuery = $false
+
+    # Process each line to extract name, index, and query
+    foreach ($line in $content) {
+        # Check if we're entering the [rule] section
+        if ($line -eq "[rule]") {
+            $inRuleSection = $true
+        }
+        
+        # Extract index values
+        if ($line -match '^index\s*=\s*\[') {
+            if ($inRuleSection) {
+                $matches1 = [regex]::Matches($line, '"([^"]*)"')
+                foreach($match1 in $matches1) {
+                    $queryMatches1 += $match1.Groups[1].Value
+                }
+            }
+        }
+        
+        # Extract name if in the rule section
+        if ($line -match '^name\s*=\s*"([^"]+)"$') {
+            if ($inRuleSection) {    
+                $name = $Matches[1]
+            }
+        }
+        
+        # Start collecting query when we hit the query line
+        if ($line -eq "query = '''") {
+            $collectingQuery = $true
+            $inRuleSection = $false
+        }
+        
+        # Collect query content
+        if ($collectingQuery) {
+            if ($line -eq "'''") {
+                # End of query, process collected content
+                $collectingQuery = $false
+                $queryRaw2 += $line.Substring(0, $line.IndexOf("'''"))
+                $matches2 = [regex]::Matches($queryRaw2, '(?:^|\s|\(|\[)([A-Za-z0-9_.]+)(?=\s*(?:==|!=|>|<|in|:))')
+                foreach($match2 in $matches2) {
+                    $queryMatches2 += $match2.Groups[1].Value
+                }
+            } else {
+                # Append line to query content
+                $queryRaw2 += $line
+            }
+        }
+    }
+
+    # Output results
+    if ($outputToFile) {
+        # Write index matches to file
+        foreach($queryMatch1 in $queryMatches1) {
+            @("$name,Index,$queryMatch1") | Out-File -FilePath $outputFile -Append -Encoding utf8
+        }
+        # Write query field matches to file
+        foreach($queryMatch2 in $queryMatches2) {
+            @("$name,Field,$queryMatch2") | Out-File -FilePath $outputFile -Append -Encoding utf8
+        }
+    } else {
+        # Output to console if not writing to file
+        Write-Host "Name: $name"
+        Write-Host "Indexes: $queryMatches1"
+        Write-Host "Required Fields: $queryMatches2"
+        Write-Host "-------------------"
+    }
+}
+
+# Final output message
+if ($outputToFile) {
+    Write-Host "Data extraction completed. Results saved to $outputFile"
+} else {
+    Write-Host "Data extraction completed. Results output to screen."
+}
