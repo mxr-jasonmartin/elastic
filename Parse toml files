@@ -16,7 +16,7 @@ if ($outputToFile) {
     $outputFile = "C:\Users\ja008827\Downloads\vscode-directory\output_$timestamp.csv"
    
     # Create CSV header
-    @("FileName", "Name", "Query") | Out-File -FilePath $outputFile -Encoding utf8
+    "Name,Type,Result" | Out-File -FilePath $outputFile -Encoding utf8
 }
 
 # Get all .toml files recursively
@@ -26,9 +26,9 @@ Get-ChildItem -Path $directoryPath -Recurse -Filter *.toml | ForEach-Object {
 
     # Initialize variables for name, index, query, and matches
     $name = ""
-    $queryRaw2 = ""
-    $queryMatches1 = @()  # For index values
-    $queryMatches2 = @()  # For query fields
+    $queryRaw = ""
+    $indexMatches = @()  # For index values
+    $queryMatches = @()  # For query fields
 
     # Flags to track sections and collection states
     $inRuleSection = $false
@@ -44,15 +44,15 @@ Get-ChildItem -Path $directoryPath -Recurse -Filter *.toml | ForEach-Object {
         # Extract index values
         if ($line -match '^index\s*=\s*\[') {
             if ($inRuleSection) {
-                $matches1 = [regex]::Matches($line, '"([^"]*)"')
-                foreach($match1 in $matches1) {
-                    $queryMatches1 += $match1.Groups[1].Value
+                $matches = [regex]::Matches($line, '"([^"]*)"')
+                foreach($match in $matches) {
+                    $indexMatches += $match.Groups[1].Value
                 }
             }
         }
         
         # Extract name if in the rule section
-        if ($line -match '^name\s*=\s*"([^"]+)"$') {
+        if ($line -match '^name\s*=\s*"([^"]*)"') {
             if ($inRuleSection) {    
                 $name = $Matches[1]
             }
@@ -69,14 +69,14 @@ Get-ChildItem -Path $directoryPath -Recurse -Filter *.toml | ForEach-Object {
             if ($line -eq "'''") {
                 # End of query, process collected content
                 $collectingQuery = $false
-                $queryRaw2 += $line.Substring(0, $line.IndexOf("'''"))
-                $matches2 = [regex]::Matches($queryRaw2, '(?:^|\s|\(|\[)([A-Za-z0-9_.]+)(?=\s*(?:==|!=|>|<|in|:))')
-                foreach($match2 in $matches2) {
-                    $queryMatches2 += $match2.Groups[1].Value
+                $queryRaw += $line.Substring(0, $line.IndexOf("'''"))
+                $matches = [regex]::Matches($queryRaw, '(?:^|\s|\(|\[)([A-Za-z0-9_.]+)(?=\s*(?:==|!=|>|<|in|:))')
+                foreach($match in $matches) {
+                    $queryMatches += $match.Groups[1].Value
                 }
             } else {
                 # Append line to query content
-                $queryRaw2 += $line
+                $queryRaw += $line
             }
         }
     }
@@ -84,18 +84,18 @@ Get-ChildItem -Path $directoryPath -Recurse -Filter *.toml | ForEach-Object {
     # Output results
     if ($outputToFile) {
         # Write index matches to file
-        foreach($queryMatch1 in $queryMatches1) {
-            @("$name,Index,$queryMatch1") | Out-File -FilePath $outputFile -Append -Encoding utf8
+        foreach($indexMatch in $indexMatches) {
+            @("$name,Index,$indexMatch") | Out-File -FilePath $outputFile -Append -Encoding utf8
         }
         # Write query field matches to file
-        foreach($queryMatch2 in $queryMatches2) {
-            @("$name,Field,$queryMatch2") | Out-File -FilePath $outputFile -Append -Encoding utf8
+        foreach($queryMatch in $queryMatches) {
+            @("$name,Field,$queryMatch") | Out-File -FilePath $outputFile -Append -Encoding utf8
         }
     } else {
         # Output to console if not writing to file
         Write-Host "Name: $name"
-        Write-Host "Indexes: $queryMatches1"
-        Write-Host "Required Fields: $queryMatches2"
+        Write-Host "Indexes: $indexMatches"
+        Write-Host "Required Fields: $queryMatches"
         Write-Host "-------------------"
     }
 }
