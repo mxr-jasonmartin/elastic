@@ -1,5 +1,12 @@
+# Output to a csv or screen
+$outputToFile = $true
+
 # Directory where .toml files are located
-$directoryPath = "C:\Users\ja008827\Downloads\vscode-directory\Elastic Detection Rules"
+$directoryPath = "C:\Users\ja008827\Downloads\vscode-directory\Elastic Detection Rules\detection-rules\rules"
+
+#directory to save csv file
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$outputFile = "C:\Users\ja008827\Downloads\vscode-directory\output_$timestamp.csv"
 
 # Ensure the directory exists
 if (-not (Test-Path $directoryPath)) {
@@ -7,32 +14,42 @@ if (-not (Test-Path $directoryPath)) {
     exit
 }
 
-# Flag to decide where to output results
-$outputToFile = $true
-
-# Create a datetime stamp for the filename if outputting to file
-if ($outputToFile) {
-    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $outputFile = "C:\Users\ja008827\Downloads\vscode-directory\output_$timestamp.csv"
-   
-    # Create CSV header
-    "Name,Type,Result" | Out-File -FilePath $outputFile -Encoding utf8
-}
+# Creates CVS object and inserts the headers
+$csvData = @()
 
 # Get all .toml files recursively
 Get-ChildItem -Path $directoryPath -Recurse -Filter *.toml | ForEach-Object {
+    
+    # Read the .toml file
     $file = $_.FullName
     $content = Get-Content -Path $file
-
-    # Initialize variables for name, index, query, and matches
+    
+    # Find the folder and declare that as the category
+    $category = ($_.DirectoryName -split '\\')[-1]
+    
+    # Do not parse the _depricated directory
+    if ($category -eq "_deprecated") {
+        $content = ""
+    }
+    # Initialize variables for name
     $name = ""
-    $queryRaw = ""
-    $indexMatches = @()  # For index values
-    $queryMatches = @()  # For query fields
+    # Initialize variables for index
+    $index = ""
+    $indexmatch = ""
+    $indexMatches = @()
+    # Initialize variables for query
+    $query = ""
+    $queryMatches = @()
+    # Initialize variables for fields
+    $field = ""
+    $fieldMatches = @()
 
     # Flags to track sections and collection states
     $inRuleSection = $false
+    $indexSelected = $false
+    $nameSelected = $false
     $collectingQuery = $false
+    $collectingComplete = $false
 
     # Process each line to extract name, index, and query
     foreach ($line in $content) {
@@ -40,64 +57,61 @@ Get-ChildItem -Path $directoryPath -Recurse -Filter *.toml | ForEach-Object {
         if ($line -eq "[rule]") {
             $inRuleSection = $true
         }
-        
-        # Extract index values
-        if ($line -match '^index\s*=\s*\[') {
-            if ($inRuleSection) {
-                $matches = [regex]::Matches($line, '"([^"]*)"')
-                foreach($match in $matches) {
-                    $indexMatches += $match.Groups[1].Value
+        if ($inRuleSection) {
+            # Save Index line
+            if ($line -match '^index\s*=\s*\[') {
+                $indexSelected = $true
+                $indexMatch = [regex]::Matches($line, '"([^"]*)"')
+                foreach($match in $indexMatch) {
+                    if ($match -and $match.Groups[1]) {
+                        $indexMatches += $match.Groups[1].Value
+                    }
                 }
             }
-        }
-        
-        # Extract name if in the rule section
-        if ($line -match '^name\s*=\s*"([^"]*)"') {
-            if ($inRuleSection) {    
+            #Save Name line
+            if ($line -match '^name\s*=\s*"([^"]*)"') { 
+                $nameSelected = $true 
                 $name = $Matches[1]
             }
-        }
-        
-        # Start collecting query when we hit the query line
-        if ($line -eq "query = '''") {
-            $collectingQuery = $true
-            $inRuleSection = $false
-        }
-        
-        # Collect query content
-        if ($collectingQuery) {
-            if ($line -eq "'''") {
-                # End of query, process collected content
-                $collectingQuery = $false
-                $queryRaw += $line.Substring(0, $line.IndexOf("'''"))
-                $matches = [regex]::Matches($queryRaw, '(?:^|\s|\(|\[)([A-Za-z0-9_.]+)(?=\s*(?:==|!=|>|<|in|:))')
-                foreach($match in $matches) {
-                    $queryMatches += $match.Groups[1].Value
+            if ($line -eq "query = '''") {
+                $collectingQuery = $true
+            }
+            if ($indexSelected -and $nameSelected -and $collectingQuery) {
+                if ($line -eq "'''") {
+                    # End of query, process collected content
+                    $collectingComplete = $true
+                    $query += $line.Substring(0, $line.IndexOf("'''"))
+                    $queryMatches = [regex]::Matches($query, '(?:^|\s|\(|\[)([A-Za-z0-9_.]+)(?=\s*(?:==|!=|>|<|in|:))')
+                    foreach($match in $queryMatches) {
+                        $fieldMatches += $match.Groups[1].Value
+                    }
+                    foreach($index in $indexMatches) {
+                        $csvData += [PSCustomObject]@{ Category = $category; Name = $name; Type = "Index"; Result = $index }
+                    }
+                    # Process query field matches
+                    foreach($field in $fieldMatches) {
+                        $csvData += [PSCustomObject]@{ Category = $category; Name = $name; Type = "Field"; Result = $field }
+                    }
+                } else {
+                    # Append line to query content
+                    $query += $line
                 }
-            } else {
-                # Append line to query content
-                $queryRaw += $line
+            }
+            if ($collectingComplete) {
+                # End collection for this file
+                continue
             }
         }
     }
+}
 
-    # Output results
-    if ($outputToFile) {
-        # Write index matches to file
-        foreach($indexMatch in $indexMatches) {
-            @("$name,Index,$indexMatch") | Out-File -FilePath $outputFile -Append -Encoding utf8
-        }
-        # Write query field matches to file
-        foreach($queryMatch in $queryMatches) {
-            @("$name,Field,$queryMatch") | Out-File -FilePath $outputFile -Append -Encoding utf8
-        }
-    } else {
-        # Output to console if not writing to file
-        Write-Host "Name: $name"
-        Write-Host "Indexes: $indexMatches"
-        Write-Host "Required Fields: $queryMatches"
-        Write-Host "-------------------"
-    }
+if ($outputToFile) {
+    # Export to CSV, ensuring commas within fields are handled correctly
+    $csvData | Export-Csv -Path $outputFile -NoTypeInformation -Delimiter ","
+    # Write-Host $csvData
+} else {
+    # Output to console if not writing to file
+    Write-Host $csvData
 }
 
 # Final output message
