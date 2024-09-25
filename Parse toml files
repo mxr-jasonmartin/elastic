@@ -81,7 +81,8 @@ Get-ChildItem -Path $directoryPath -Recurse -Filter *.toml | ForEach-Object {
                     # End of query, process collected content
                     $collectingComplete = $true
                     $query += $line.Substring(0, $line.IndexOf("'''"))
-                    $queryMatches = [regex]::Matches($query, '(?:^|\s|\(|\[)([A-Za-z0-9_.]+)(?=\s*(?:==|!=|>|<|in|:))')
+                    $queryMatches = [regex]::Matches($query, '^(?![ \t]*/\*)(?:\s*(\b\w+(?:[._]\w+)*\b)(?=\s*(?:where|in|==|<|>|:)))')
+                    Write-Host $queryMatches
                     foreach($match in $queryMatches) {
                         $fieldMatches += $match.Groups[1].Value
                     }
